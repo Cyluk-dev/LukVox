@@ -9,11 +9,25 @@ interface ToolbarProps {
   setShowShapes: (show: boolean) => void;
   activeTool: Tool;
   setActiveTool: (tool: Tool) => void;
+  isSmartShapeEnabled: boolean;
+  setIsSmartShapeEnabled: (enabled: boolean) => void;
+  enabledShapes: ('rectangle' | 'circle' | 'triangle')[];
 }
 
-const Toolbar: React.FC<ToolbarProps> = ({ showShapes, setShowShapes, activeTool, setActiveTool }) => {
+const Toolbar: React.FC<ToolbarProps> = ({ 
+  showShapes, 
+  setShowShapes, 
+  activeTool, 
+  setActiveTool,
+  isSmartShapeEnabled,
+  setIsSmartShapeEnabled,
+  enabledShapes
+}) => {
   return (
-    <div className="toolbar-container">
+    <div 
+      className="toolbar-container"
+      onMouseDown={(e) => e.stopPropagation()}
+    >
       {/* Upper Floating Toolbar */}
       <div className="toolbar-upper">
         <IconButton><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 7v6h6"/><path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13"/></svg></IconButton>
@@ -27,7 +41,13 @@ const Toolbar: React.FC<ToolbarProps> = ({ showShapes, setShowShapes, activeTool
 
       {/* Main Floating Toolbar */}
       <div className="toolbar-main">
-        {showShapes && <ShapesMenu />}
+        {showShapes && (
+          <ShapesMenu 
+            enabledShapes={enabledShapes} 
+            activeTool={activeTool}
+            setActiveTool={setActiveTool}
+          />
+        )}
 
         {/* 1. Cursor */}
         <IconButton 
@@ -85,10 +105,7 @@ const Toolbar: React.FC<ToolbarProps> = ({ showShapes, setShowShapes, activeTool
           onClick={() => setActiveTool('text')}
         >
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-            <path d="M4 7H20" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"></path>
-            <path d="M4 17H9" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"></path>
-            <path d="M4 12H17.5C18.8807 12 20 13.1193 20 14.5V14.5C20 15.8807 18.8807 17 17.5 17H12.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"></path>
-            <path d="M15 15.5L12.5 17L15 18.5V15.5Z" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"></path>
+            <path d="M4 7H20M4 12H17.5C18.8807 12 20 13.1193 20 14.5V14.5C20 15.8807 18.8807 17 17.5 17H12.5M15 15.5L12.5 17L15 18.5V15.5Z" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"></path>
           </svg>
         </IconButton>
         
@@ -98,10 +115,7 @@ const Toolbar: React.FC<ToolbarProps> = ({ showShapes, setShowShapes, activeTool
           onClick={() => setActiveTool('note')}
         >
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-            <path d="M8 14L16 14" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"></path>
-            <path d="M8 10L10 10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"></path>
-            <path d="M8 18L12 18" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"></path>
-            <path d="M10 3H6C4.89543 3 4 3.89543 4 5V20C4 21.1046 4.89543 22 6 22H18C19.1046 22 20 21.1046 20 20V5C20 3.89543 19.1046 3 18 3H14.5M10 3V1M10 3V5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"></path>
+            <path d="M8 14L16 14M8 10L10 10M8 18L12 18M10 3H6C4.89543 3 4 3.89543 4 5V20C4 21.1046 4.89543 22 6 22H18C19.1046 22 20 21.1046 20 20V5C20 3.89543 19.1046 3 18 3H14.5M10 3V1M10 3V5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"></path>
           </svg>
         </IconButton>
         
@@ -110,17 +124,27 @@ const Toolbar: React.FC<ToolbarProps> = ({ showShapes, setShowShapes, activeTool
           active={activeTool === 'image'} 
           onClick={() => setActiveTool('image')}
         >
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-            <path d="M6 20L18 20" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"></path>
-            <path d="M12 16V4M12 4L15.5 7.5M12 4L8.5 7.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"></path>
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M12 16V4M12 4L15.5 7.5M12 4L8.5 7.5" />
+            <path d="M6 20L18 20" />
           </svg>
         </IconButton>
         
-        <IconButton><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><circle cx="12" cy="12" r="3"/></svg></IconButton>
-        <Separator />
         <IconButton 
           active={showShapes}
           onClick={() => setShowShapes(!showShapes)}
+        >
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <rect width="18" height="18" x="3" y="3" rx="2"/><circle cx="12" cy="12" r="3"/>
+          </svg>
+        </IconButton>
+
+        <Separator />
+        
+        <IconButton 
+          active={isSmartShapeEnabled}
+          onClick={() => setIsSmartShapeEnabled(!isSmartShapeEnabled)}
+          title="Auto-reconocimiento de formas"
         >
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <path d="m18 15-6-6-6 6"/>

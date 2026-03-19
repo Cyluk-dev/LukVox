@@ -11,7 +11,7 @@ export const distanceToSegment = (p: Point, a: Point, b: Point) => {
 export const checkStrokeHit = (pos: Point, stroke: Stroke, scale: number) => {
   const threshold = 10 / scale;
 
-  if (stroke.type === 'text' && stroke.text && stroke.points.length > 0) {
+  if ((stroke.type === 'text' || stroke.type === 'note' || stroke.type === 'image') && stroke.points.length > 0) {
     const box = getBoundingBox(stroke);
     if (!box) return false;
 
@@ -58,6 +58,19 @@ export const getBoundingBox = (stroke: Stroke) => {
     const width = maxChars * fontSize * 0.6 * sX;
     const height = lines.length * fontSize * 1.2 * sY;
     return { x: start.x, y: start.y, width, height };
+  }
+
+  if (stroke.type === 'note') {
+    const start = stroke.points[0];
+    const size = 180; // Fixed size for sticky notes
+    return { x: start.x - size / 2, y: start.y - size / 2, width: size, height: size };
+  }
+
+  if (stroke.type === 'image' && stroke.imageUrl) {
+    const start = stroke.points[0];
+    const width = stroke.imageWidth || 200;
+    const height = stroke.imageHeight || 200;
+    return { x: start.x - width / 2, y: start.y - height / 2, width, height };
   }
 
   let minX = stroke.points[0].x, maxX = stroke.points[0].x;
@@ -119,6 +132,161 @@ export const getSvgPathFromPoints = (outlinePoints: number[][]) => {
 
   d.push('Z');
   return d.join(' ');
+};
+
+export const detectRectangle = (points: Point[], threshold = 0.6) => {
+  if (points.length < 10) return null;
+
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+  points.forEach(p => {
+    minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x);
+    minY = Math.min(minY, p.y); maxY = Math.max(maxY, p.y);
+  });
+
+  const width = maxX - minX;
+  const height = maxY - minY;
+  if (width < 10 || height < 10) return null;
+
+  // Check for square-ness
+  const ratio = width / height;
+  let finalMinX = minX, finalMaxX = maxX, finalMinY = minY, finalMaxY = maxY;
+  
+  if (ratio > 0.85 && ratio < 1.15) {
+    const side = (width + height) / 2;
+    const centerX = minX + width / 2;
+    const centerY = minY + height / 2;
+    finalMinX = centerX - side / 2;
+    finalMaxX = centerX + side / 2;
+    finalMinY = centerY - side / 2;
+    finalMaxY = centerY + side / 2;
+  }
+
+  const sides = [
+    { a: { x: finalMinX, y: finalMinY }, b: { x: finalMaxX, y: finalMinY } },
+    { a: { x: finalMaxX, y: finalMinY }, b: { x: finalMaxX, y: finalMaxY } },
+    { a: { x: finalMaxX, y: finalMaxY }, b: { x: finalMinX, y: finalMaxY } },
+    { a: { x: finalMinX, y: finalMaxY }, b: { x: finalMinX, y: finalMinY } }
+  ];
+
+  let totalDistance = 0;
+  points.forEach(p => {
+    let minSideDist = Infinity;
+    sides.forEach(side => {
+      minSideDist = Math.min(minSideDist, distanceToSegment(p, side.a, side.b));
+    });
+    totalDistance += minSideDist;
+  });
+
+  const avgDistance = totalDistance / points.length;
+  const diagonal = Math.sqrt(width * width + height * height);
+  // Improved similarity calculation: use a smaller denominator for stricter detection
+  const similarity = Math.max(0, 1 - (avgDistance / (diagonal * 0.12)));
+
+  if (similarity >= threshold) {
+    return [
+      { x: finalMinX, y: finalMinY },
+      { x: finalMaxX, y: finalMinY },
+      { x: finalMaxX, y: finalMaxY },
+      { x: finalMinX, y: finalMaxY },
+      { x: finalMinX, y: finalMinY }
+    ];
+  }
+  return null;
+};
+
+export const detectCircle = (points: Point[], threshold = 0.6) => {
+  if (points.length < 10) return null;
+
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+  points.forEach(p => {
+    minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x);
+    minY = Math.min(minY, p.y); maxY = Math.max(maxY, p.y);
+  });
+
+  const width = maxX - minX;
+  const height = maxY - minY;
+  
+  // A circle should have a width/height ratio close to 1
+  const ratio = width / height;
+  if (ratio < 0.7 || ratio > 1.3) return null;
+
+  const centerX = (minX + maxX) / 2;
+  const centerY = (minY + maxY) / 2;
+  const radius = (width + height) / 4;
+
+  if (radius < 5) return null;
+
+  let totalDistErr = 0;
+  points.forEach(p => {
+    const dist = Math.sqrt(Math.pow(p.x - centerX, 2) + Math.pow(p.y - centerY, 2));
+    totalDistErr += Math.abs(dist - radius);
+  });
+
+  const avgDistErr = totalDistErr / points.length;
+  // Use a stricter error denominator (radius * 0.4 instead of 0.5)
+  const similarity = Math.max(0, 1 - (avgDistErr / (radius * 0.4)));
+
+  if (similarity >= threshold) {
+    // Return 2 points: center and a point on the circumference
+    // To help with grid alignment, we'll return a point on the right
+    return [
+      { x: centerX, y: centerY },
+      { x: centerX + radius, y: centerY }
+    ];
+  }
+  return null;
+};
+
+export const detectTriangle = (points: Point[], threshold = 0.6) => {
+  if (points.length < 10) return null;
+
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+  points.forEach(p => {
+    minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x);
+    minY = Math.min(minY, p.y); maxY = Math.max(maxY, p.y);
+  });
+
+  const width = maxX - minX;
+  const height = maxY - minY;
+  if (width < 10 || height < 10) return null;
+
+  // We'll try to detect a triangle that fits the bounding box
+  // To make it more robust, we look at the first and last points to guess orientation
+  const first = points[0];
+  const last = points[points.length - 1];
+  
+  // Default: Upward pointing triangle
+  let p1 = { x: minX + width / 2, y: minY };
+  let p2 = { x: maxX, y: maxY };
+  let p3 = { x: minX, y: maxY };
+
+  // If the user seems to have drawn it in a different orientation, we could adjust
+  // but for now, we stick to the most common "upright" triangle for simplicity.
+
+  const sides = [
+    { a: p1, b: p2 },
+    { a: p2, b: p3 },
+    { a: p3, b: p1 }
+  ];
+
+  let totalDistance = 0;
+  points.forEach(p => {
+    let minSideDist = Infinity;
+    sides.forEach(side => {
+      minSideDist = Math.min(minSideDist, distanceToSegment(p, side.a, side.b));
+    });
+    totalDistance += minSideDist;
+  });
+
+  const avgDistance = totalDistance / points.length;
+  const diagonal = Math.sqrt(width * width + height * height);
+  // Stricter denominator for triangle
+  const similarity = Math.max(0, 1 - (avgDistance / (diagonal * 0.15)));
+
+  if (similarity >= threshold) {
+    return [p1, p2, p3, p1];
+  }
+  return null;
 };
 
 export const generateArrowPoints = (start: Point, end: Point, baseWidth: number) => {

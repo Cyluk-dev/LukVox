@@ -33,6 +33,7 @@ const WhiteboardCanvas: React.FC<WhiteboardCanvasProps> = ({
   activeOpacity,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const imageCache = useRef<Map<string, HTMLImageElement>>(new Map());
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -114,6 +115,90 @@ const WhiteboardCanvas: React.FC<WhiteboardCanvasProps> = ({
 
       currentCtx.closePath();
       currentCtx.fill();
+      currentCtx.restore();
+    };
+
+    const drawRectangle = (stroke: Stroke, xOffset = 0, yOffset = 0, angle = 0, box: any = null) => {
+      const points = stroke.points;
+      if (points.length < 2) return;
+      
+      const center = box ? { x: box.x + box.width / 2, y: box.y + box.height / 2 } : { x: 0, y: 0 };
+      
+      currentCtx.save();
+      currentCtx.globalAlpha = stroke.opacity !== undefined ? stroke.opacity : 1;
+      
+      currentCtx.beginPath();
+      currentCtx.strokeStyle = stroke.isMarkedForDeletion ? '#e0e0e0' : stroke.color;
+      currentCtx.lineWidth = stroke.width * 1.5;
+      currentCtx.lineCap = 'round';
+      currentCtx.lineJoin = 'round';
+
+      const p0 = rotatePoint(points[0], angle, center, xOffset, yOffset);
+      currentCtx.moveTo(p0.x * scale + offset.x, p0.y * scale + offset.y);
+
+      for (let i = 1; i < points.length; i++) {
+        const p = rotatePoint(points[i], angle, center, xOffset, yOffset);
+        currentCtx.lineTo(p.x * scale + offset.x, p.y * scale + offset.y);
+      }
+      
+      currentCtx.stroke();
+      currentCtx.restore();
+    };
+
+    const drawCircle = (stroke: Stroke, xOffset = 0, yOffset = 0, angle = 0, box: any = null) => {
+      const points = stroke.points;
+      if (points.length < 2) return;
+      
+      const center = points[0];
+      const radiusPoint = points[1];
+      const radius = Math.sqrt(Math.pow(radiusPoint.x - center.x, 2) + Math.pow(radiusPoint.y - center.y, 2));
+      
+      const drawCenter = box ? { x: box.x + box.width / 2, y: box.y + box.height / 2 } : { x: 0, y: 0 };
+      const pCenter = rotatePoint(center, angle, drawCenter, xOffset, yOffset);
+
+      currentCtx.save();
+      currentCtx.globalAlpha = stroke.opacity !== undefined ? stroke.opacity : 1;
+      
+      currentCtx.beginPath();
+      currentCtx.strokeStyle = stroke.isMarkedForDeletion ? '#e0e0e0' : stroke.color;
+      currentCtx.lineWidth = stroke.width * 1.5;
+      
+      currentCtx.arc(
+        pCenter.x * scale + offset.x,
+        pCenter.y * scale + offset.y,
+        radius * scale,
+        0,
+        Math.PI * 2
+      );
+      
+      currentCtx.stroke();
+      currentCtx.restore();
+    };
+
+    const drawTriangle = (stroke: Stroke, xOffset = 0, yOffset = 0, angle = 0, box: any = null) => {
+      const points = stroke.points;
+      if (points.length < 3) return;
+      
+      const center = box ? { x: box.x + box.width / 2, y: box.y + box.height / 2 } : { x: 0, y: 0 };
+      
+      currentCtx.save();
+      currentCtx.globalAlpha = stroke.opacity !== undefined ? stroke.opacity : 1;
+      
+      currentCtx.beginPath();
+      currentCtx.strokeStyle = stroke.isMarkedForDeletion ? '#e0e0e0' : stroke.color;
+      currentCtx.lineWidth = stroke.width * 1.5;
+      currentCtx.lineCap = 'round';
+      currentCtx.lineJoin = 'round';
+
+      const p0 = rotatePoint(points[0], angle, center, xOffset, yOffset);
+      currentCtx.moveTo(p0.x * scale + offset.x, p0.y * scale + offset.y);
+
+      for (let i = 1; i < points.length; i++) {
+        const p = rotatePoint(points[i], angle, center, xOffset, yOffset);
+        currentCtx.lineTo(p.x * scale + offset.x, p.y * scale + offset.y);
+      }
+      
+      currentCtx.stroke();
       currentCtx.restore();
     };
 
@@ -202,6 +287,112 @@ const WhiteboardCanvas: React.FC<WhiteboardCanvasProps> = ({
       currentCtx.restore();
     };
 
+    const drawNote = (stroke: Stroke, xOffset = 0, yOffset = 0, angle = 0, box: any = null) => {
+      if (!box) return;
+      
+      const center = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+      
+      currentCtx.save();
+      currentCtx.globalAlpha = stroke.opacity !== undefined ? stroke.opacity : 1;
+      
+      currentCtx.translate((center.x + xOffset) * scale + offset.x, (center.y + yOffset) * scale + offset.y);
+      currentCtx.rotate(angle);
+      
+      const w = box.width * scale;
+      const h = box.height * scale;
+      const fold = 25 * scale;
+
+      // Draw shadow
+      currentCtx.shadowColor = 'rgba(0,0,0,0.1)';
+      currentCtx.shadowBlur = 10;
+      currentCtx.shadowOffsetY = 5;
+
+      // Main shape
+      currentCtx.beginPath();
+      currentCtx.moveTo(-w/2, -h/2);
+      currentCtx.lineTo(w/2 - fold, -h/2);
+      currentCtx.lineTo(w/2, -h/2 + fold);
+      currentCtx.lineTo(w/2, h/2);
+      currentCtx.lineTo(-w/2, h/2);
+      currentCtx.closePath();
+      
+      currentCtx.fillStyle = stroke.color;
+      currentCtx.fill();
+      
+      // Reset shadow for text and fold
+      currentCtx.shadowColor = 'transparent';
+      
+      // Folded corner
+      currentCtx.beginPath();
+      currentCtx.moveTo(w/2 - fold, -h/2);
+      currentCtx.lineTo(w/2 - fold, -h/2 + fold);
+      currentCtx.lineTo(w/2, -h/2 + fold);
+      currentCtx.fillStyle = 'rgba(0,0,0,0.1)';
+      currentCtx.fill();
+      
+      // Border
+      currentCtx.strokeStyle = 'rgba(0,0,0,0.05)';
+      currentCtx.lineWidth = 1;
+      currentCtx.stroke();
+
+      // Text
+      if (stroke.text) {
+        currentCtx.fillStyle = 'rgba(0,0,0,0.7)';
+        const fontSize = 14 * scale;
+        currentCtx.font = `${fontSize}px sans-serif`;
+        currentCtx.textAlign = 'center';
+        currentCtx.textBaseline = 'middle';
+        
+        const lines = stroke.text.split('\n');
+        const lineHeight = fontSize * 1.2;
+        const totalHeight = lines.length * lineHeight;
+        
+        lines.forEach((line, i) => {
+          currentCtx.fillText(line, 0, (i * lineHeight) - (totalHeight / 2) + (lineHeight / 2));
+        });
+      }
+      
+      currentCtx.restore();
+    };
+
+    const drawImage = (stroke: Stroke, xOffset = 0, yOffset = 0, angle = 0, box: any = null) => {
+      if (!box || !stroke.imageUrl) return;
+      
+      const center = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+      
+      let img = imageCache.current.get(stroke.imageUrl);
+      if (!img) {
+        img = new Image();
+        img.src = stroke.imageUrl;
+        img.onload = () => {
+          imageCache.current.set(stroke.imageUrl!, img!);
+          // Force a re-render by calling the effect again or similar mechanism
+          // In this simple app, we can just wait for next mouse interaction or state change
+        };
+        imageCache.current.set(stroke.imageUrl, img);
+      }
+
+      if (img.complete) {
+        currentCtx.save();
+        currentCtx.globalAlpha = stroke.opacity !== undefined ? stroke.opacity : 1;
+        
+        currentCtx.translate((center.x + xOffset) * scale + offset.x, (center.y + yOffset) * scale + offset.y);
+        currentCtx.rotate(angle);
+        
+        const w = box.width * scale;
+        const h = box.height * scale;
+        
+        currentCtx.drawImage(img, -w/2, -h/2, w, h);
+        
+        if (stroke.isMarkedForDeletion) {
+          currentCtx.fillStyle = 'rgba(255, 255, 255, 0.5)';
+          currentCtx.fillRect(-w/2, -h/2, w, h);
+        }
+        
+        currentCtx.restore();
+      }
+    };
+
     // Draw saved strokes
     strokes.forEach(s => {
       const isBeingDragged = s.id === selectedStrokeId && isDraggingStroke;
@@ -213,10 +404,35 @@ const WhiteboardCanvas: React.FC<WhiteboardCanvasProps> = ({
         if (isBeingDragged) {
           drawArrow({ ...s, color: '#cccccc' }, dragOffset.x, dragOffset.y, s.angle || 0, box);
         }
+      } else if (s.type === 'rectangle') {
+        drawRectangle(s, 0, 0, s.angle || 0, box);
+        if (isBeingDragged) {
+          drawRectangle({ ...s, color: '#cccccc' }, dragOffset.x, dragOffset.y, s.angle || 0, box);
+        }
+      } else if (s.type === 'circle') {
+        drawCircle(s, 0, 0, s.angle || 0, box);
+        if (isBeingDragged) {
+          drawCircle({ ...s, color: '#cccccc' }, dragOffset.x, dragOffset.y, s.angle || 0, box);
+        }
+      } else if (s.type === 'triangle') {
+        drawTriangle(s, 0, 0, s.angle || 0, box);
+        if (isBeingDragged) {
+          drawTriangle({ ...s, color: '#cccccc' }, dragOffset.x, dragOffset.y, s.angle || 0, box);
+        }
       } else if (s.type === 'text') {
         drawText(s, 0, 0, s.angle || 0, box);
         if (isBeingDragged) {
           drawText({ ...s, color: '#cccccc' }, dragOffset.x, dragOffset.y, s.angle || 0, box);
+        }
+      } else if (s.type === 'note') {
+        drawNote(s, 0, 0, s.angle || 0, box);
+        if (isBeingDragged) {
+          drawNote({ ...s, color: '#cccccc' }, dragOffset.x, dragOffset.y, s.angle || 0, box);
+        }
+      } else if (s.type === 'image') {
+        drawImage(s, 0, 0, s.angle || 0, box);
+        if (isBeingDragged) {
+          drawImage({ ...s, color: '#cccccc' }, dragOffset.x, dragOffset.y, s.angle || 0, box);
         }
       } else {
         // Use stroke's individual width and thinning (default to a stable 0.8 if missing)

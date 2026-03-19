@@ -1,4 +1,7 @@
 import React, { useState } from 'react';
+import Slider from '../atoms/Slider';
+import Button from '../atoms/Button';
+import Input from '../atoms/Input';
 
 interface StrokePreset {
   id: string;
@@ -11,6 +14,13 @@ interface StrokeSettingsProps {
   setBaseStrokeWidth: (width: number) => void;
   thinning: number;
   setThinning: (thinning: number) => void;
+  enabledShapes: ('rectangle' | 'circle' | 'triangle')[];
+  shapeThresholds: {
+    rectangle: number;
+    circle: number;
+    triangle: number;
+  };
+  onThresholdChange: (shape: 'rectangle' | 'circle' | 'triangle', value: number) => void;
   presets: StrokePreset[];
   onSavePreset: () => void;
   onResetToDefaults: () => void;
@@ -22,6 +32,9 @@ const StrokeSettings: React.FC<StrokeSettingsProps> = ({
   setBaseStrokeWidth,
   thinning,
   setThinning,
+  enabledShapes,
+  shapeThresholds,
+  onThresholdChange,
   presets,
   onSavePreset,
   onResetToDefaults,
@@ -29,8 +42,12 @@ const StrokeSettings: React.FC<StrokeSettingsProps> = ({
 }) => {
   const [editingWidth, setEditingWidth] = useState(false);
   const [editingThinning, setEditingThinning] = useState(false);
+  
+  const [editingThreshold, setEditingThreshold] = useState<'rectangle' | 'circle' | 'triangle' | null>(null);
+  
   const [tempWidth, setTempWidth] = useState(baseStrokeWidth.toString());
   const [tempThinning, setTempThinning] = useState(thinning.toString());
+  const [tempThreshold, setTempThreshold] = useState('');
 
   const handleWidthSubmit = () => {
     let val = parseFloat(tempWidth);
@@ -50,6 +67,15 @@ const StrokeSettings: React.FC<StrokeSettingsProps> = ({
     setEditingThinning(false);
   };
 
+  const handleThresholdSubmit = () => {
+    if (!editingThreshold) return;
+    let val = parseFloat(tempThreshold);
+    if (!isNaN(val)) {
+      onThresholdChange(editingThreshold, Math.max(0, Math.min(100, val)) / 100);
+    }
+    setEditingThreshold(null);
+  };
+
   const PencilIcon = () => (
     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginLeft: '4px', cursor: 'pointer', opacity: 0.6 }}>
       <path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/>
@@ -57,7 +83,10 @@ const StrokeSettings: React.FC<StrokeSettingsProps> = ({
   );
 
   return (
-    <div className="stroke-settings-panel">
+    <div 
+      className="stroke-settings-panel"
+      onMouseDown={(e) => e.stopPropagation()}
+    >
       <div className="settings-group">
         <div className="settings-header">
           <div className="grid-settings-label">Grosor</div>
@@ -65,19 +94,17 @@ const StrokeSettings: React.FC<StrokeSettingsProps> = ({
             <PencilIcon />
           </div>
         </div>
-        <input 
-          type="range" 
-          min="0" 
-          max="10" 
-          step="0.1"
+        <Slider 
+          min={0} 
+          max={10} 
+          step={0.1}
           value={baseStrokeWidth > 10 ? 10 : baseStrokeWidth} 
-          onChange={(e) => setBaseStrokeWidth(Number(e.target.value))}
-          className="grid-size-slider"
+          onChange={setBaseStrokeWidth}
         />
         <div className="grid-settings-value">
           {editingWidth ? (
-            <input 
-              className="settings-input"
+            <Input 
+              inputSize="sm"
               value={tempWidth}
               autoFocus
               onChange={(e) => setTempWidth(e.target.value)}
@@ -97,19 +124,17 @@ const StrokeSettings: React.FC<StrokeSettingsProps> = ({
             <PencilIcon />
           </div>
         </div>
-        <input 
-          type="range" 
-          min="0" 
-          max="3" 
-          step="0.05"
+        <Slider 
+          min={0} 
+          max={3} 
+          step={0.05}
           value={thinning > 3 ? 3 : thinning} 
-          onChange={(e) => setThinning(Number(e.target.value))}
-          className="grid-size-slider"
+          onChange={setThinning}
         />
         <div className="grid-settings-value">
           {editingThinning ? (
-            <input 
-              className="settings-input"
+            <Input 
+              inputSize="sm"
               value={tempThinning}
               autoFocus
               onChange={(e) => setTempThinning(e.target.value)}
@@ -122,26 +147,124 @@ const StrokeSettings: React.FC<StrokeSettingsProps> = ({
         </div>
       </div>
 
+      {enabledShapes.includes('rectangle') && (
+        <div className="settings-group">
+          <div className="settings-header">
+            <div className="grid-settings-label">Similitud Rectángulo</div>
+            <div onClick={() => { setEditingThreshold('rectangle'); setTempThreshold((shapeThresholds.rectangle * 100).toFixed(0)); }}>
+              <PencilIcon />
+            </div>
+          </div>
+          <Slider 
+            min={0} 
+            max={1} 
+            step={0.01}
+            value={shapeThresholds.rectangle} 
+            onChange={(v) => onThresholdChange('rectangle', v)}
+          />
+          <div className="grid-settings-value">
+            {editingThreshold === 'rectangle' ? (
+              <Input 
+                inputSize="sm"
+                value={tempThreshold}
+                autoFocus
+                onChange={(e) => setTempThreshold(e.target.value)}
+                onBlur={handleThresholdSubmit}
+                onKeyDown={(e) => e.key === 'Enter' && handleThresholdSubmit()}
+              />
+            ) : (
+              `${(shapeThresholds.rectangle * 100).toFixed(0)}%`
+            )}
+          </div>
+        </div>
+      )}
+
+      {enabledShapes.includes('circle') && (
+        <div className="settings-group">
+          <div className="settings-header">
+            <div className="grid-settings-label">Similitud Círculo</div>
+            <div onClick={() => { setEditingThreshold('circle'); setTempThreshold((shapeThresholds.circle * 100).toFixed(0)); }}>
+              <PencilIcon />
+            </div>
+          </div>
+          <Slider 
+            min={0} 
+            max={1} 
+            step={0.01}
+            value={shapeThresholds.circle} 
+            onChange={(v) => onThresholdChange('circle', v)}
+          />
+          <div className="grid-settings-value">
+            {editingThreshold === 'circle' ? (
+              <Input 
+                inputSize="sm"
+                value={tempThreshold}
+                autoFocus
+                onChange={(e) => setTempThreshold(e.target.value)}
+                onBlur={handleThresholdSubmit}
+                onKeyDown={(e) => e.key === 'Enter' && handleThresholdSubmit()}
+              />
+            ) : (
+              `${(shapeThresholds.circle * 100).toFixed(0)}%`
+            )}
+          </div>
+        </div>
+      )}
+
+      {enabledShapes.includes('triangle') && (
+        <div className="settings-group">
+          <div className="settings-header">
+            <div className="grid-settings-label">Similitud Triángulo</div>
+            <div onClick={() => { setEditingThreshold('triangle'); setTempThreshold((shapeThresholds.triangle * 100).toFixed(0)); }}>
+              <PencilIcon />
+            </div>
+          </div>
+          <Slider 
+            min={0} 
+            max={1} 
+            step={0.01}
+            value={shapeThresholds.triangle} 
+            onChange={(v) => onThresholdChange('triangle', v)}
+          />
+          <div className="grid-settings-value">
+            {editingThreshold === 'triangle' ? (
+              <Input 
+                inputSize="sm"
+                value={tempThreshold}
+                autoFocus
+                onChange={(e) => setTempThreshold(e.target.value)}
+                onBlur={handleThresholdSubmit}
+                onKeyDown={(e) => e.key === 'Enter' && handleThresholdSubmit()}
+              />
+            ) : (
+              `${(shapeThresholds.triangle * 100).toFixed(0)}%`
+            )}
+          </div>
+        </div>
+      )}
+
       <div className="settings-actions">
-        <button className="settings-action-btn primary" onClick={onSavePreset} disabled={presets.length >= 20}>
+        <Button variant="primary" onClick={onSavePreset} disabled={presets.length >= 20} fullWidth>
           Guardar ajuste {presets.length + 1}
-        </button>
-        <button className="settings-action-btn secondary" onClick={onResetToDefaults}>
+        </Button>
+        <Button variant="secondary" onClick={onResetToDefaults} fullWidth>
           Volver a predeterminados
-        </button>
+        </Button>
       </div>
 
       {presets.length > 0 && (
         <div className="presets-grid">
           {presets.map((preset, index) => (
-            <button 
+            <Button 
               key={preset.id} 
-              className="preset-tag" 
+              variant="outline"
+              size="sm"
               onClick={() => onApplyPreset(preset)}
               title={`Grosor: ${preset.width}, Presión: ${preset.thinning}`}
+              className="preset-tag-override"
             >
               #{index + 1}
-            </button>
+            </Button>
           ))}
         </div>
       )}

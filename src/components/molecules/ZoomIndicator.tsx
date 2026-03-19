@@ -1,4 +1,6 @@
 import React from 'react';
+import Input from '../atoms/Input';
+import IconButton from '../atoms/IconButton';
 
 interface ZoomIndicatorProps {
   scale: number;
@@ -22,17 +24,21 @@ const ZoomIndicator: React.FC<ZoomIndicatorProps> = ({
   onZoomInputKeyDown 
 }) => {
   return (
-    <div className="zoom-indicator-wrapper">
+    <div 
+      className="zoom-indicator-wrapper"
+      onMouseDown={(e) => e.stopPropagation()}
+    >
       <div className="zoom-indicator" onClick={onClick}>
         {isEditing ? (
-          <input
+          <Input
             type="text"
-            className="zoom-input"
+            className="zoom-input-atom-override"
             value={zoomInput}
             onChange={(e) => onZoomInputChange(e.target.value)}
             onBlur={onZoomInputBlur}
             onKeyDown={onZoomInputKeyDown}
             autoFocus
+            inputSize="sm"
           />
         ) : (
           `${(scale * 100).toFixed(0)}%`
@@ -41,11 +47,15 @@ const ZoomIndicator: React.FC<ZoomIndicatorProps> = ({
           <path d="m9 18 6-6-6-6"/>
         </svg>
       </div>
-      <button className="zoom-edit-btn" onClick={onEditClick} title="Editar zoom">
+      <IconButton 
+        className="zoom-edit-btn-atom" 
+        onClick={onEditClick} 
+        title="Editar zoom"
+      >
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
           <path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/>
         </svg>
-      </button>
+      </IconButton>
     </div>
   );
 };

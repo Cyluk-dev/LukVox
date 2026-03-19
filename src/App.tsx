@@ -8,12 +8,16 @@ import WhiteboardCanvas from './components/organisms/WhiteboardCanvas'
 import GridSettings from './components/molecules/GridSettings'
 import StrokeSettings from './components/molecules/StrokeSettings'
 import StylePanel from './components/molecules/StylePanel'
-import { type Point, type Stroke,type Tool } from './types'
+import TextEditorPopup from './components/molecules/TextEditorPopup'
+import { type Point, type Stroke, type Tool } from './types'
 import { 
   checkStrokeHit, 
   getBoundingBox, 
   getRotateHandlePos, 
   getHandleAt,
+  detectRectangle,
+  detectCircle,
+  detectTriangle,
   generateArrowPoints
 } from './utils/whiteboardUtils'
 
@@ -34,6 +38,13 @@ function App() {
   const [thinning, setThinning] = useState(0.8)
   const [presets, setPresets] = useState<StrokePreset[]>([])
   const [showStrokeSettings, setShowStrokeSettings] = useState(false)
+  const [isSmartShapeEnabled, setIsSmartShapeEnabled] = useState(false)
+  const [enabledShapes, setEnabledShapes] = useState<('rectangle' | 'circle' | 'triangle')[]>([])
+  const [shapeThresholds, setShapeThresholds] = useState({
+    rectangle: 0.6,
+    circle: 0.6,
+    triangle: 0.6
+  })
   
   // New style states
   const [activeColor, setActiveColor] = useState('#1e1e1e')
@@ -67,6 +78,11 @@ function App() {
   
   const [arrowStart, setArrowStart] = useState<Point | null>(null)
   
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const importInputRef = useRef<HTMLInputElement>(null)
+  
+  const [showProjectMenu, setShowProjectMenu] = useState(false)
+
   const [textInput, setTextInput] = useState<{ 
      x: number, 
      y: number, 
@@ -81,7 +97,8 @@ function App() {
      editingId?: string,
      angle?: number,
      scaleX?: number,
-     scaleY?: number
+     scaleY?: number,
+     type?: 'text' | 'note'
    } | null>(null)
 
   const lastMousePos = useRef({ x: 0, y: 0 })
@@ -92,7 +109,110 @@ function App() {
     y: (y - offset.y) / scale
   })
 
-  const handleMouseDown = (e: React.MouseEvent) => {
+  const triggerImageUpload = () => {
+    if (fileInputRef.current) {
+      fileInputRef.current.click()
+    }
+  }
+
+  const handleImageFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    const reader = new FileReader()
+    reader.onload = (event) => {
+      const url = event.target?.result as string
+      const img = new Image()
+      img.onload = () => {
+        const center = toWorld(window.innerWidth / 2, window.innerHeight / 2)
+        const id = Math.random().toString(36).substr(2, 9)
+        const maxWidth = 400
+        const scale = img.width > maxWidth ? maxWidth / img.width : 1
+        
+        setStrokes(prev => [...prev, {
+          id,
+          type: 'image',
+          points: [center],
+          imageUrl: url,
+          imageWidth: img.width * scale,
+          imageHeight: img.height * scale,
+          color: '#000000',
+          width: 1,
+          thinning: 0,
+          opacity: 1,
+          angle: 0
+        }])
+      }
+      img.src = url
+    }
+    reader.readAsDataURL(file)
+  }
+
+  const createStickyNoteAtCenter = () => {
+     const center = toWorld(window.innerWidth / 2, window.innerHeight / 2)
+     const id = Math.random().toString(36).substr(2, 9)
+     
+     setStrokes(prev => [...prev, {
+       id,
+       type: 'note',
+       points: [center],
+       text: 'Nota...',
+       color: '#ff9d00', // Orange color
+       width: 1,
+       thinning: 0,
+       opacity: 1,
+       angle: 0,
+       scaleX: 1,
+       scaleY: 1
+     }])
+   }
+ 
+   const handleExportLukvox = () => {
+     const projectData = {
+       strokes,
+       baseGridSize,
+       enabledShapes,
+       shapeThresholds,
+       version: '1.0.0'
+     };
+     const blob = new Blob([JSON.stringify(projectData)], { type: 'application/json' });
+     const url = URL.createObjectURL(blob);
+     const a = document.createElement('a');
+     a.href = url;
+     a.download = `project-${new Date().toISOString().split('T')[0]}.lukvox`;
+     a.click();
+     URL.revokeObjectURL(url);
+     setShowProjectMenu(false);
+   };
+
+   const triggerImportLukvox = () => {
+     if (importInputRef.current) {
+       importInputRef.current.click();
+     }
+     setShowProjectMenu(false);
+   };
+
+   const handleImportLukvox = (e: React.ChangeEvent<HTMLInputElement>) => {
+     const file = e.target.files?.[0];
+     if (!file) return;
+
+     const reader = new FileReader();
+     reader.onload = (event) => {
+       try {
+         const data = JSON.parse(event.target?.result as string);
+         if (data.strokes) setStrokes(data.strokes);
+         if (data.baseGridSize) setBaseGridSize(data.baseGridSize);
+         if (data.enabledShapes) setEnabledShapes(data.enabledShapes);
+         if (data.shapeThresholds) setShapeThresholds(data.shapeThresholds);
+       } catch (err) {
+         console.error('Error al importar el archivo .lukvox', err);
+         alert('Error al importar el archivo .lukvox');
+       }
+     };
+     reader.readAsText(file);
+   };
+
+   const handleMouseDown = (e: React.MouseEvent) => {
     const isMiddleClick = e.button === 1
     const isLeftClick = e.button === 0
     const worldPos = toWorld(e.clientX, e.clientY)
@@ -131,7 +251,7 @@ function App() {
 
               // Check resize handles
               const handle = getHandleAt(worldPos, box, scale)
-              if (handle) {
+              if (handle && selectedStroke.type !== 'note') {
                 setIsResizingStroke(true)
                 setResizingHandle(handle)
                 setDragStartPos(worldPos)
@@ -154,7 +274,7 @@ function App() {
           if (selectedStroke) {
             const hit = checkStrokeHit(worldPos, selectedStroke, scale)
             if (hit) {
-              if (isDoubleClick && selectedStroke.type === 'text') {
+              if (isDoubleClick && (selectedStroke.type === 'text' || selectedStroke.type === 'note')) {
             setTextInput({
               x: selectedStroke.points[0].x,
               y: selectedStroke.points[0].y,
@@ -164,10 +284,13 @@ function App() {
               color: selectedStroke.color,
               isBold: !!selectedStroke.isBold,
               isItalic: !!selectedStroke.isItalic,
+              textAlign: selectedStroke.textAlign,
+              opacity: selectedStroke.opacity,
               editingId: selectedStroke.id,
               angle: selectedStroke.angle || 0,
               scaleX: selectedStroke.scaleX || 1,
-              scaleY: selectedStroke.scaleY || 1
+              scaleY: selectedStroke.scaleY || 1,
+              type: selectedStroke.type as 'text' | 'note'
             })
             setSelectedStrokeId(null)
             return
@@ -183,7 +306,7 @@ function App() {
         // Otherwise check all strokes to select a new one
         const hitStroke = [...strokes].reverse().find(stroke => checkStrokeHit(worldPos, stroke, scale))
         if (hitStroke) {
-          if (isDoubleClick && hitStroke.type === 'text') {
+          if (isDoubleClick && (hitStroke.type === 'text' || hitStroke.type === 'note')) {
             setTextInput({
               x: hitStroke.points[0].x,
               y: hitStroke.points[0].y,
@@ -198,7 +321,8 @@ function App() {
               editingId: hitStroke.id,
               angle: hitStroke.angle || 0,
               scaleX: hitStroke.scaleX || 1,
-              scaleY: hitStroke.scaleY || 1
+              scaleY: hitStroke.scaleY || 1,
+              type: hitStroke.type as 'text' | 'note'
             })
             setSelectedStrokeId(null)
             return
@@ -212,7 +336,7 @@ function App() {
         }
       } else if (activeTool === 'pencil') {
         setCurrentStroke([{ ...worldPos, t: Date.now(), w: baseStrokeWidth * 4 }])
-      } else if (activeTool === 'arrow') {
+      } else if (activeTool === 'arrow' || activeTool === 'rectangle' || activeTool === 'circle' || activeTool === 'triangle') {
         setArrowStart(worldPos)
         setCurrentStroke([{ ...worldPos }, { ...worldPos }])
       } else if (activeTool === 'text') {
@@ -226,7 +350,7 @@ function App() {
           y: worldPos.y, 
           value: '', 
           isEditing: true,
-          fontSize: sizeMap[activeFontSize],
+          fontSize: sizeMap[activeFontSize as keyof typeof sizeMap],
           color: activeColor,
           isBold: false,
           isItalic: false,
@@ -250,6 +374,8 @@ function App() {
       return stroke
     }))
   }
+
+  const snapToGrid = (val: number) => Math.round(val / baseGridSize) * baseGridSize;
 
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
@@ -358,7 +484,7 @@ function App() {
           
           setCurrentStroke(prev => prev ? [...prev, { ...worldPos, t, w }] : [{ ...worldPos, t, w }])
         }
-      } else if (activeTool === 'arrow' && arrowStart) {
+      } else if ((activeTool === 'arrow' || activeTool === 'rectangle' || activeTool === 'circle' || activeTool === 'triangle') && arrowStart) {
         setCurrentStroke([arrowStart, worldPos])
       } else if (activeTool === 'eraser' && (e.buttons & 1)) {
         eraseStrokeAt(worldPos)
@@ -390,30 +516,89 @@ function App() {
       setDragStartPos(null)
       setDragOffset({ x: 0, y: 0 })
       
-    if (currentStroke) {
-      if (activeTool === 'pencil' || activeTool === 'arrow' || activeTool === 'text') {
-        setStrokes(prev => [...prev, {
-          id: Math.random().toString(36).substr(2, 9),
-          points: currentStroke,
-          color: activeColor,
-          opacity: activeOpacity,
-          width: baseStrokeWidth,
-          thinning: thinning,
-          type: activeTool as 'pencil' | 'arrow' | 'text',
-          text: activeTool === 'text' ? (textInput?.value || '') : undefined,
-          fontSize: activeTool === 'text' ? (textInput?.fontSize || sizeMap[activeFontSize]) : undefined,
-          isBold: textInput?.isBold,
-          isItalic: textInput?.isItalic,
-          textAlign: activeTextAlign as any,
-          scaleX: textInput?.scaleX || 1,
-          scaleY: textInput?.scaleY || 1,
-          angle: textInput?.angle || 0
-        }])
-        setCurrentStroke(null)
-        setArrowStart(null)
-        setTextInput(null)
+      if (currentStroke) {
+        if (activeTool === 'pencil' || activeTool === 'arrow' || activeTool === 'text' || activeTool === 'rectangle' || activeTool === 'circle' || activeTool === 'triangle') {
+          let pointsToSave = currentStroke;
+          let typeToSave: 'pencil' | 'arrow' | 'text' | 'rectangle' | 'circle' | 'triangle' = activeTool as any;
+
+          if (activeTool === 'pencil' && isSmartShapeEnabled) {
+            const detectedRect = enabledShapes.includes('rectangle') ? detectRectangle(currentStroke, shapeThresholds.rectangle) : null;
+            const detectedCircle = enabledShapes.includes('circle') ? detectCircle(currentStroke, shapeThresholds.circle) : null;
+            const detectedTriangle = enabledShapes.includes('triangle') ? detectTriangle(currentStroke, shapeThresholds.triangle) : null;
+
+            if (detectedRect) {
+              typeToSave = 'rectangle';
+              pointsToSave = detectedRect.map(p => ({ x: snapToGrid(p.x), y: snapToGrid(p.y) }));
+            } else if (detectedCircle) {
+              typeToSave = 'circle';
+              const snappedCenter = { x: snapToGrid(detectedCircle[0].x), y: snapToGrid(detectedCircle[0].y) };
+              const rawRadius = Math.sqrt(Math.pow(detectedCircle[1].x - detectedCircle[0].x, 2) + Math.pow(detectedCircle[1].y - detectedCircle[0].y, 2));
+              const snappedRadius = Math.max(baseGridSize, snapToGrid(rawRadius));
+              pointsToSave = [
+                snappedCenter,
+                { x: snappedCenter.x + snappedRadius, y: snappedCenter.y }
+              ];
+            } else if (detectedTriangle) {
+              typeToSave = 'triangle';
+              pointsToSave = detectedTriangle.map(p => ({ x: snapToGrid(p.x), y: snapToGrid(p.y) }));
+            }
+          } else if (activeTool === 'rectangle' && arrowStart) {
+            const start = { x: snapToGrid(arrowStart.x), y: snapToGrid(arrowStart.y) };
+            const end = { x: snapToGrid(currentStroke[1].x), y: snapToGrid(currentStroke[1].y) };
+            pointsToSave = [
+              { x: start.x, y: start.y },
+              { x: end.x, y: start.y },
+              { x: end.x, y: end.y },
+              { x: start.x, y: end.y },
+              { x: start.x, y: start.y }
+            ];
+          } else if (activeTool === 'circle' && arrowStart) {
+            const center = { x: snapToGrid(arrowStart.x), y: snapToGrid(arrowStart.y) };
+            const radiusPoint = { x: snapToGrid(currentStroke[1].x), y: snapToGrid(currentStroke[1].y) };
+            const radius = Math.sqrt(Math.pow(radiusPoint.x - center.x, 2) + Math.pow(radiusPoint.y - center.y, 2));
+            pointsToSave = [
+              center,
+              { x: center.x + radius, y: center.y }
+            ];
+          } else if (activeTool === 'triangle' && arrowStart) {
+            const start = { x: snapToGrid(arrowStart.x), y: snapToGrid(arrowStart.y) };
+            const end = { x: snapToGrid(currentStroke[1].x), y: snapToGrid(currentStroke[1].y) };
+            pointsToSave = [
+              { x: start.x + (end.x - start.x) / 2, y: start.y },
+              { x: end.x, y: end.y },
+              { x: start.x, y: end.y },
+              { x: start.x + (end.x - start.x) / 2, y: start.y }
+            ];
+          } else if (activeTool === 'arrow' && arrowStart) {
+            pointsToSave = [
+              { x: snapToGrid(arrowStart.x), y: snapToGrid(arrowStart.y) },
+              { x: snapToGrid(currentStroke[1].x), y: snapToGrid(currentStroke[1].y) }
+            ];
+            pointsToSave = generateArrowPoints(pointsToSave[0], pointsToSave[1], baseStrokeWidth);
+          }
+
+          setStrokes(prev => [...prev, {
+            id: Math.random().toString(36).substr(2, 9),
+            points: pointsToSave,
+            color: activeColor,
+            opacity: activeOpacity,
+            width: baseStrokeWidth,
+            thinning: thinning,
+            type: typeToSave,
+            text: activeTool === 'text' ? (textInput?.value || '') : undefined,
+            fontSize: activeTool === 'text' ? (textInput?.fontSize || sizeMap[activeFontSize as keyof typeof sizeMap]) : undefined,
+            isBold: textInput?.isBold,
+            isItalic: textInput?.isItalic,
+            textAlign: activeTextAlign as any,
+            scaleX: textInput?.scaleX || 1,
+            scaleY: textInput?.scaleY || 1,
+            angle: textInput?.angle || 0
+          }])
+          setCurrentStroke(null)
+          setArrowStart(null)
+          setTextInput(null)
+        }
       }
-    }
 
       if (activeTool === 'eraser') {
         setStrokes(prev => prev.filter(stroke => !stroke.isMarkedForDeletion))
@@ -437,7 +622,7 @@ function App() {
       window.removeEventListener('mousemove', handleMouseMove)
       window.removeEventListener('mouseup', handleMouseUp)
     }
-  }, [isDragging, currentStroke, activeTool, offset, scale, isDraggingStroke, dragOffset, selectedStrokeId, isResizingStroke, resizingHandle, initialResizingBox, initialStrokePoints, isRotatingStroke, initialRotationAngle, initialMouseAngle, textInput, activeColor, activeOpacity, activeFontSize, activeTextAlign, baseStrokeWidth, thinning, arrowStart])
+  }, [isDragging, currentStroke, activeTool, offset, scale, isDraggingStroke, dragOffset, selectedStrokeId, isResizingStroke, resizingHandle, initialResizingBox, initialStrokePoints, isRotatingStroke, initialRotationAngle, initialMouseAngle, textInput, activeColor, activeOpacity, activeFontSize, activeTextAlign, baseStrokeWidth, thinning, arrowStart, isSmartShapeEnabled, baseGridSize])
 
   useEffect(() => {
     const handleWheel = (e: WheelEvent) => {
@@ -482,7 +667,7 @@ function App() {
   }
 
   const handleTextSubmit = () => {
-    if (textInput && textInput.value.trim() && textInput.value !== 'toca para escribir...') {
+    if (textInput && textInput.value.trim()) {
       if (textInput.editingId) {
         // Update existing
         setStrokes(prev => prev.map(s => s.id === textInput.editingId ? {
@@ -508,7 +693,7 @@ function App() {
           color: textInput.color,
           width: baseStrokeWidth,
           thinning: thinning,
-          type: 'text',
+          type: textInput.type || 'text',
           text: textInput.value,
           fontSize: textInput.fontSize,
           isBold: textInput.isBold,
@@ -526,6 +711,9 @@ function App() {
 
   const handleColorChange = (newColor: string) => {
     setActiveColor(newColor);
+    if (textInput) {
+      setTextInput({ ...textInput, color: newColor });
+    }
     if (selectedStrokeId) {
       setStrokes(prev => prev.map(s => s.id === selectedStrokeId ? { ...s, color: newColor } : s));
     }
@@ -533,6 +721,9 @@ function App() {
 
   const handleOpacityChange = (newOpacity: number) => {
     setActiveOpacity(newOpacity);
+    if (textInput) {
+      setTextInput({ ...textInput, opacity: newOpacity });
+    }
     if (selectedStrokeId) {
       setStrokes(prev => prev.map(s => s.id === selectedStrokeId ? { ...s, opacity: newOpacity } : s));
     }
@@ -541,6 +732,9 @@ function App() {
   const handleFontSizeChange = (newSize: 'S' | 'M' | 'L' | 'XL') => {
     setActiveFontSize(newSize);
     const sizeMap = { S: 14, M: 20, L: 32, XL: 48 };
+    if (textInput) {
+      setTextInput({ ...textInput, fontSize: sizeMap[newSize] });
+    }
     if (selectedStrokeId) {
       setStrokes(prev => prev.map(s => s.id === selectedStrokeId && s.type === 'text' ? { ...s, fontSize: sizeMap[newSize] } : s));
     }
@@ -548,9 +742,16 @@ function App() {
 
   const handleTextAlignChange = (newAlign: 'left' | 'center' | 'right' | 'justify') => {
     setActiveTextAlign(newAlign);
-    if (selectedStrokeId) {
-      setStrokes(prev => prev.map(s => s.id === selectedStrokeId && s.type === 'text' ? { ...s, textAlign: newAlign as any } : s));
+    if (textInput) {
+      setTextInput({ ...textInput, textAlign: newAlign });
     }
+    if (selectedStrokeId) {
+      setStrokes(prev => prev.map(s => s.id === selectedStrokeId && s.type === 'text' ? { ...s, textAlign: newAlign } : s));
+    }
+  };
+
+  const handleThresholdChange = (shape: 'rectangle' | 'circle' | 'triangle', value: number) => {
+    setShapeThresholds(prev => ({ ...prev, [shape]: value }));
   };
 
   const currentGridSize = (baseGridSize || 20) * (scale || 1)
@@ -578,6 +779,25 @@ function App() {
     }
   }
 
+  const selectedStroke = strokes.find(s => s.id === selectedStrokeId);
+  const isTextSelected = activeTool === 'text' || (selectedStroke?.type === 'text');
+
+  // Update active style states when selected stroke changes
+  useEffect(() => {
+    if (selectedStroke) {
+      if (selectedStroke.color) setActiveColor(selectedStroke.color);
+      if (selectedStroke.opacity !== undefined) setActiveOpacity(selectedStroke.opacity);
+      if (selectedStroke.type === 'text' && selectedStroke.fontSize) {
+        // Find closest size in sizeMap
+        const sizeEntry = (Object.entries(sizeMap) as [keyof typeof sizeMap, number][]).find(
+          ([_, val]) => val === selectedStroke.fontSize
+        );
+        if (sizeEntry) setActiveFontSize(sizeEntry[0]);
+        if (selectedStroke.textAlign) setActiveTextAlign(selectedStroke.textAlign as any);
+      }
+    }
+  }, [selectedStrokeId]);
+
   return (
     <div 
       className="whiteboard" 
@@ -589,6 +809,43 @@ function App() {
         cursor: isDragging ? 'grabbing' : (activeTool === 'pencil' || activeTool === 'arrow') ? 'crosshair' : activeTool === 'text' ? 'text' : activeTool === 'eraser' ? 'cell' : 'default'
       } as React.CSSProperties}
     >
+      <div className="project-header" onMouseDown={(e) => e.stopPropagation()}>
+        <div className="brand">LukVox</div>
+        <div className="project-menu-container">
+          <button 
+            className={`project-menu-trigger ${showProjectMenu ? 'active' : ''}`}
+            onClick={() => setShowProjectMenu(!showProjectMenu)}
+          >
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="1"/><circle cx="12" cy="5" r="1"/><circle cx="12" cy="19" r="1"/>
+            </svg>
+          </button>
+          {showProjectMenu && (
+            <div className="project-menu">
+              <div className="menu-item" onClick={triggerImportLukvox}>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
+                </svg>
+                Abrir archivo .lukvox
+              </div>
+              <div className="menu-item" onClick={handleExportLukvox}>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/>
+                </svg>
+                Guardar como .lukvox
+              </div>
+              <div className="menu-divider" />
+              <div className="menu-item" onClick={handleExportLukvox}>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/>
+                </svg>
+                Exportar proyecto
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+
       <WhiteboardCanvas 
         strokes={strokes.filter(s => s.id !== textInput?.editingId)}
         currentStroke={currentStroke}
@@ -604,8 +861,35 @@ function App() {
         activeOpacity={activeOpacity}
       />
 
-      {/* Zoom and Settings Container Bottom-Left */}
-      <div className="zoom-container">
+      {/* Zoom / Project Map Container Bottom-Left */}
+      <div className="zoom-left-container">
+        {showMinimap ? (
+          <MinimapPanel 
+            scale={scale} 
+            setScale={setScale} 
+            baseGridSize={baseGridSize}
+            setBaseGridSize={setBaseGridSize}
+            onClose={() => setShowMinimap(false)} 
+            strokes={strokes}
+            offset={offset}
+            setOffset={setOffset}
+          />
+        ) : (
+          <ZoomIndicator 
+            scale={scale} 
+            onClick={() => setShowMinimap(true)} 
+            onEditClick={handleZoomEditClick}
+            isEditing={isEditingZoom}
+            zoomInput={zoomInput}
+            onZoomInputChange={setZoomInput}
+            onZoomInputBlur={handleZoomInputBlur}
+            onZoomInputKeyDown={handleZoomInputKeyDown}
+          />
+        )}
+      </div>
+
+      {/* Settings Container Bottom-Right */}
+      <div className="settings-right-container">
         {showStrokeSettings && (
           <div className="settings-popup-wrapper">
             <div className="settings-popup-header">
@@ -617,6 +901,9 @@ function App() {
               setBaseStrokeWidth={setBaseStrokeWidth}
               thinning={thinning}
               setThinning={setThinning}
+              enabledShapes={enabledShapes}
+              shapeThresholds={shapeThresholds}
+              onThresholdChange={handleThresholdChange}
               presets={presets}
               onSavePreset={handleSavePreset}
               onResetToDefaults={handleResetToDefaults}
@@ -624,77 +911,35 @@ function App() {
             />
           </div>
         )}
-        <div className="zoom-controls-row">
-          <button 
-            className={`settings-toggle-btn ${showStrokeSettings ? 'active' : ''}`}
-            onClick={() => setShowStrokeSettings(!showStrokeSettings)}
-          >
-            Ajustes
-          </button>
-          {showMinimap ? (
-            <MinimapPanel 
-              scale={scale} 
-              setScale={setScale} 
-              baseGridSize={baseGridSize}
-              setBaseGridSize={setBaseGridSize}
-              onClose={() => setShowMinimap(false)} 
-            />
-          ) : (
-            <ZoomIndicator 
-              scale={scale} 
-              onClick={() => setShowMinimap(true)} 
-              onEditClick={handleZoomEditClick}
-              isEditing={isEditingZoom}
-              zoomInput={zoomInput}
-              onZoomInputChange={setZoomInput}
-              onZoomInputBlur={handleZoomInputBlur}
-              onZoomInputKeyDown={handleZoomInputKeyDown}
-            />
-          )}
-        </div>
+        <button 
+          className={`settings-toggle-btn ${showStrokeSettings ? 'active' : ''}`}
+          onClick={() => setShowStrokeSettings(!showStrokeSettings)}
+        >
+          Ajustes
+        </button>
       </div>
 
       {textInput && (
-        <div 
-          style={{
-            position: 'absolute',
-            left: textInput.x * scale + offset.x,
-            top: textInput.y * scale + offset.y,
-            zIndex: 1001,
-            pointerEvents: 'auto'
+        <TextEditorPopup
+          value={textInput.value}
+          onChange={(val) => setTextInput({ ...textInput, value: val, isEditing: true })}
+          onConfirm={() => {
+            handleTextSubmit();
+            setActiveTool('select');
           }}
-        >
-          <textarea
-            className="whiteboard-text-input-direct"
-            autoFocus
-            value={textInput.value}
-            onChange={(e) => setTextInput({ ...textInput, value: e.target.value, isEditing: true })}
-            onBlur={handleTextSubmit}
-            onKeyDown={(e) => {
-              if (e.key === 'Escape') {
-                setTextInput(null);
-              }
-              if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault();
-                handleTextSubmit();
-                setActiveTool('select'); 
-              }
-            }}
-            style={{
-              fontSize: `${textInput.fontSize * scale}px`,
-              color: textInput.color,
-              opacity: textInput.opacity !== undefined ? textInput.opacity : activeOpacity,
-              fontFamily: '"Shantell Sans", cursive',
-              fontWeight: textInput.isBold ? 'bold' : 'normal',
-              fontStyle: textInput.isItalic ? 'italic' : 'normal',
-              textAlign: textInput.textAlign as any || 'left',
-              minWidth: '10px',
-              minHeight: '1.2em',
-              transform: `rotate(${textInput.angle || 0}rad) scale(${textInput.scaleX || 1}, ${textInput.scaleY || 1})`,
-              transformOrigin: 'top left'
-            }}
-          />
-        </div>
+          onCancel={() => setTextInput(null)}
+          color={textInput.color}
+          fontSize={textInput.fontSize}
+          isBold={textInput.isBold}
+          onBoldChange={(bold) => setTextInput({ ...textInput, isBold: bold })}
+          isItalic={textInput.isItalic}
+          onItalicChange={(italic) => setTextInput({ ...textInput, isItalic: italic })}
+          textAlign={(textInput.textAlign as any) || 'left'}
+          onTextAlignChange={(align) => setTextInput({ ...textInput, textAlign: align })}
+          activeFontSize={activeFontSize}
+          onFontSizeChange={handleFontSizeChange}
+          type={textInput.type}
+        />
       )}
 
       <Toolbar 
@@ -702,11 +947,24 @@ function App() {
         setShowShapes={setShowShapes} 
         activeTool={activeTool}
         setActiveTool={(tool) => {
+          if (tool === 'note') {
+            createStickyNoteAtCenter();
+            setActiveTool('select');
+            return;
+          }
+          if (tool === 'image') {
+            triggerImageUpload();
+            setActiveTool('select');
+            return;
+          }
           setActiveTool(tool);
           if (tool === 'pencil' || tool === 'arrow' || tool === 'text') {
             setSelectedStrokeId(null);
           }
         }}
+        isSmartShapeEnabled={isSmartShapeEnabled}
+        setIsSmartShapeEnabled={setIsSmartShapeEnabled}
+        enabledShapes={enabledShapes}
       />
 
       <StylePanel 
@@ -714,13 +972,32 @@ function App() {
         onColorChange={handleColorChange}
         opacity={activeOpacity}
         onOpacityChange={handleOpacityChange}
-        fontSize={activeFontSize}
-        onFontSizeChange={handleFontSizeChange}
-        textAlign={activeTextAlign}
-        onTextAlignChange={handleTextAlignChange}
       />
 
-      {showPopup && <OnboardingPopup onClose={() => setShowPopup(false)} />}
+      {showPopup && (
+        <OnboardingPopup 
+          onClose={(shapes) => {
+            setEnabledShapes(shapes);
+            setShowPopup(false);
+          }} 
+        />
+      )}
+
+      <input 
+        type="file" 
+        ref={fileInputRef} 
+        style={{ display: 'none' }} 
+        accept="image/png, image/jpeg, image/webp, image/avif"
+        onChange={handleImageFileChange}
+      />
+
+      <input 
+        type="file" 
+        ref={importInputRef} 
+        style={{ display: 'none' }} 
+        accept=".lukvox"
+        onChange={handleImportLukvox}
+      />
     </div>
   )
 }
